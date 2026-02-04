@@ -578,3 +578,150 @@ class TestImmichClient:
 
         # Assert
         assert result is None
+
+    @patch("synology_to_immich.immich.httpx.Client")
+    def test_get_albums(self, mock_client_class: MagicMock):
+        """
+        アルバム一覧取得のテスト
+
+        GET /api/albums で全アルバムを取得する。
+        """
+        # Arrange
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {
+                "id": "album-uuid-1",
+                "albumName": "家族写真",
+                "assetCount": 150,
+            },
+            {
+                "id": "album-uuid-2",
+                "albumName": "旅行2024",
+                "assetCount": 80,
+            },
+        ]
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.get.return_value = mock_response
+        mock_client_class.return_value.__enter__.return_value = mock_client_instance
+
+        client = ImmichClient(
+            base_url="http://localhost:2283",
+            api_key="test-api-key",
+        )
+
+        # Act
+        albums = client.get_albums()
+
+        # Assert
+        assert len(albums) == 2
+        assert albums[0]["id"] == "album-uuid-1"
+        assert albums[0]["albumName"] == "家族写真"
+        assert albums[0]["assetCount"] == 150
+        assert albums[1]["id"] == "album-uuid-2"
+
+        # GET リクエストが正しいエンドポイントに送信されたことを確認
+        mock_client_instance.get.assert_called_once()
+        call_args = mock_client_instance.get.call_args
+        assert "/api/albums" in call_args[0][0]
+
+    @patch("synology_to_immich.immich.httpx.Client")
+    def test_get_albums_empty(self, mock_client_class: MagicMock):
+        """
+        アルバムがない場合は空リストを返す
+        """
+        # Arrange
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = []
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.get.return_value = mock_response
+        mock_client_class.return_value.__enter__.return_value = mock_client_instance
+
+        client = ImmichClient(
+            base_url="http://localhost:2283",
+            api_key="test-api-key",
+        )
+
+        # Act
+        albums = client.get_albums()
+
+        # Assert
+        assert albums == []
+
+    @patch("synology_to_immich.immich.httpx.Client")
+    def test_get_album_assets(self, mock_client_class: MagicMock):
+        """
+        アルバム内のアセット一覧取得テスト
+
+        GET /api/albums/{id} でアルバム詳細を取得し、
+        assets フィールドからアセット一覧を返す。
+        """
+        # Arrange
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "id": "album-uuid-1",
+            "albumName": "家族写真",
+            "assets": [
+                {
+                    "id": "asset-1",
+                    "originalFileName": "photo1.jpg",
+                    "checksum": "base64-checksum-1",
+                },
+                {
+                    "id": "asset-2",
+                    "originalFileName": "photo2.jpg",
+                    "checksum": "base64-checksum-2",
+                },
+            ],
+        }
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.get.return_value = mock_response
+        mock_client_class.return_value.__enter__.return_value = mock_client_instance
+
+        client = ImmichClient(
+            base_url="http://localhost:2283",
+            api_key="test-api-key",
+        )
+
+        # Act
+        assets = client.get_album_assets("album-uuid-1")
+
+        # Assert
+        assert len(assets) == 2
+        assert assets[0]["id"] == "asset-1"
+        assert assets[0]["originalFileName"] == "photo1.jpg"
+        assert assets[0]["checksum"] == "base64-checksum-1"
+
+        # GET リクエストが正しいエンドポイントに送信されたことを確認
+        mock_client_instance.get.assert_called_once()
+        call_args = mock_client_instance.get.call_args
+        assert "/api/albums/album-uuid-1" in call_args[0][0]
+
+    @patch("synology_to_immich.immich.httpx.Client")
+    def test_get_album_assets_not_found(self, mock_client_class: MagicMock):
+        """
+        アルバムが見つからない場合は空リストを返す
+        """
+        # Arrange
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.get.return_value = mock_response
+        mock_client_class.return_value.__enter__.return_value = mock_client_instance
+
+        client = ImmichClient(
+            base_url="http://localhost:2283",
+            api_key="test-api-key",
+        )
+
+        # Act
+        assets = client.get_album_assets("non-existent-album")
+
+        # Assert
+        assert assets == []

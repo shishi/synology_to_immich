@@ -472,3 +472,60 @@ class ImmichClient:
                 return None
 
             return response.json()
+
+    def get_albums(self) -> list[dict]:
+        """
+        全アルバムを取得する
+
+        Immich の /api/albums エンドポイントから全アルバムを取得する。
+
+        Returns:
+            list[dict]: アルバム情報のリスト
+                        各辞書には以下のキーが含まれる:
+                        - id: アルバム ID（UUID 形式）
+                        - albumName: アルバム名
+                        - assetCount: アルバム内のアセット数
+        """
+        with httpx.Client(timeout=self.DEFAULT_TIMEOUT) as client:
+            url = f"{self._base_url}/api/albums"
+
+            response = client.get(
+                url,
+                headers=self._headers,
+            )
+
+            if response.status_code != 200:
+                return []
+
+            return response.json()
+
+    def get_album_assets(self, album_id: str) -> list[dict]:
+        """
+        アルバム内のアセット一覧を取得する
+
+        Immich の /api/albums/{album_id} エンドポイントからアルバム詳細を取得し、
+        assets フィールドのアセット一覧を返す。
+
+        Args:
+            album_id: アルバムの ID（UUID 形式）
+
+        Returns:
+            list[dict]: アセット情報のリスト
+                        各辞書には以下のキーが含まれる:
+                        - id: アセット ID
+                        - originalFileName: 元のファイル名
+                        - checksum: SHA1 チェックサム（base64エンコード）
+        """
+        with httpx.Client(timeout=self.DEFAULT_TIMEOUT) as client:
+            url = f"{self._base_url}/api/albums/{album_id}"
+
+            response = client.get(
+                url,
+                headers=self._headers,
+            )
+
+            if response.status_code != 200:
+                return []
+
+            data = response.json()
+            return data.get("assets", [])
