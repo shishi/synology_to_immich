@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(git check-ignore:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git worktree:*)",
+      "Bash(nix flake check:*)",
+      "Bash(nix flake show:*)",
+      "Bash(nix develop:*)",
+      "Bash(PYTHONPATH=src nix develop:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(python -m synology_to_immich:*)",
+      "Bash(python:*)",
+      "Bash(PYTHONPATH=src python:*)",
+      "Bash(wc:*)",
+      "Bash(nix flake update:*)",
+      "Bash(/home/shishi/.local/bin/pytest tests/test_progress.py -v)",
+      "Bash(/home/shishi/.local/bin/pytest tests/test_progress.py --mypy src/synology_to_immich/progress.py tests/test_progress.py -v)",
+      "Bash(mypy:*)",
+      "Bash(ruff check:*)",
+      "Bash(awk:*)",
+      "Bash(python3:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(uv run ruff:*)",
+      "Bash(uv run mypy:*)",
+      "Bash(uv run python:*)",
+      "Bash(uv pip install:*)",
+      "Bash(ping:*)",
+      "Bash(nc:*)",
+      "WebFetch(domain:immich.app)",
+      "WebFetch(domain:docs.immich.app)",
+      "Bash(curl:*)",
+      "WebFetch(domain:api.immich.app)",
+      "Bash(sqlite3:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(xargs cat:*)",
+      "Bash(git -C /home/shishi/dev/src/github.com/shishi/synology_to_immich/.worktrees/feature-migration diff --stat)"
+    ]
+  }
+}
