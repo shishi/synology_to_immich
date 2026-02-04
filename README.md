@@ -23,9 +23,6 @@ Synology Photos から Immich へ写真・動画・アルバムを安全に移�
 git clone https://github.com/shishi/synology_to_immich.git
 cd synology_to_immich
 
-# feature/migration ブランチに移動（または worktree を使用）
-git checkout feature/migration
-
 # direnv を有効化（初回のみ）
 direnv allow
 
@@ -136,19 +133,10 @@ uv add --dev パッケージ名
 │       ├── local.py          # ローカルファイル
 │       └── smb.py            # SMB ファイル
 ├── tests/                    # テスト
-├── docs/                     # ドキュメント
-│   ├── PROGRESS.md           # 実装進捗
-│   └── plans/                # 設計・実装プラン
 ├── flake.nix                 # Nix 開発環境
 ├── pyproject.toml            # プロジェクト設定
 └── uv.lock                   # 依存関係ロック
 ```
-
-## ドキュメント
-
-- [実装進捗](docs/PROGRESS.md) - 完了タスクと次のステップ
-- [設計ドキュメント](docs/plans/2025-01-31-synology-to-immich-design.md)
-- [TDD 実装プラン](docs/plans/2025-01-31-implementation-plan.md)
 
 ## ライセンス
 
