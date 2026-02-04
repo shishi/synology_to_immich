@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "synology-to-immich"
+version = "0.1.0"
+description = "Migrate photos from Synology Photos to Immich"
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.0",
+    "httpx>=0.25",
+    "smbprotocol>=1.10",
+    "psycopg2-binary>=2.9",
+    "rich>=13.0",
+    "tomli>=2.0",
+    "pillow>=10.0",
+    "exifread>=3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "pytest-asyncio>=0.21",
+    "black>=23.0",
+    "ruff>=0.1",
+    "mypy>=1.0",
+]
+
+[project.scripts]
+synology-to-immich = "synology_to_immich.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.black]
+line-length = 100
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]

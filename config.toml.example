@@ -1,0 +1,46 @@
+# Synology to Immich Migration Tool - 設定ファイル例
+#
+# このファイルをコピーして config.toml として使用してください:
+#   cp config.toml.example config.toml
+#
+# 機密情報（API キー、パスワード）は環境変数での設定も検討してください
+
+[source]
+# 移行元のパス（SMB URL またはローカルパス）
+# SMB の場合: smb://IPアドレス/共有名/パス
+# ローカルの場合: /path/to/photos
+path = "smb://192.168.1.100/photos"
+
+# SMB 認証情報（SMB URL の場合のみ必要）
+smb_user = "your_username"
+smb_password = "your_password"
+
+[immich]
+# Immich サーバーの URL
+url = "http://localhost:2283"
+
+# Immich API キー
+# 取得方法: Immich Web UI → ユーザー設定 → API キー → 新規作成
+api_key = "your_immich_api_key"
+
+[migration]
+# dry_run = true にすると実際にはアップロードしない（テスト用）
+dry_run = false
+
+# バッチサイズ（一度に処理するファイル数）
+batch_size = 100
+
+# バッチ間の待機秒数（API レート制限対策）
+batch_delay = 1.0
+
+[synology]
+# Synology Photos の PostgreSQL 接続情報（アルバム移行用）
+# db_host = "192.168.1.100"
+# db_port = 5432
+# db_user = "postgres"
+# db_password = "your_db_password"
+# db_name = "synofoto"
+
+[logging]
+# ログ出力先ディレクトリ
+log_dir = "./logs"

@@ -1,0 +1,94 @@
+{
+  description = "Synology Photos to Immich migration tool";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
+  };
+
+  outputs = { self, nixpkgs, flake-utils }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = nixpkgs.legacyPackages.${system};
+
+        # Python with required packages
+        pythonEnv = pkgs.python312.withPackages (ps: with ps; [
+          # HTTP client for Immich API
+          httpx
+
+          # SMB client for NAS access
+          smbprotocol
+
+          # PostgreSQL client for Synology Photos DB
+          psycopg2
+
+          # Image metadata (EXIF)
+          pillow
+          exifread
+
+          # CLI framework
+          click
+          rich  # Pretty console output
+
+          # Configuration
+          tomli  # TOML parser (Python 3.11+ has tomllib built-in, but we use this for compatibility)
+
+          # Testing
+          pytest
+          pytest-cov
+          pytest-asyncio
+
+          # Development
+          black
+          ruff
+          mypy
+
+          # Type stubs
+          types-pillow
+        ]);
+      in
+      {
+        devShells.default = pkgs.mkShell {
+          buildInputs = [
+            pythonEnv
+            pkgs.postgresql  # psql client for debugging
+            pkgs.uv          # Python package manager
+          ];
+
+          shellHook = ''
+            echo "🚀 Synology to Immich migration tool - dev environment"
+            echo ""
+            echo "Python: $(python --version)"
+            echo "uv: $(uv --version)"
+            echo ""
+            echo "Available commands:"
+            echo "  uv run pytest -v                     # Run tests"
+            echo "  uv run black .                       # Format code"
+            echo "  uv run ruff check .                  # Lint code"
+            echo "  uv run mypy src/                     # Type check"
+            echo "  uv sync                              # Sync dependencies"
+            echo "  psql                                 # PostgreSQL client"
+            echo ""
+          '';
+        };
+
+        # Package definition (for future use)
+        packages.default = pkgs.python312Packages.buildPythonApplication {
+          pname = "synology-to-immich";
+          version = "0.1.0";
+          src = ./.;
+
+          propagatedBuildInputs = with pkgs.python312Packages; [
+            httpx
+            smbprotocol
+            psycopg2
+            pillow
+            exifread
+            click
+            rich
+            tomli
+          ];
+        };
+      }
+    );
+}
