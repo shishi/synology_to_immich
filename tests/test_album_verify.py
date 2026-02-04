@@ -408,3 +408,322 @@ class TestAlbumVerifierComparison:
         assert result.immich_asset_count == 1
         assert result.missing_in_immich == []
         assert "/volume1/photo/file1.jpg" in result.hash_mismatches
+
+
+class TestAlbumVerifierBatchProcessing:
+    """AlbumVerifier のバッチ処理テスト"""
+
+    def test_batch_processing(self):
+        """
+        100件ごとのバッチ処理が正しく動作することを確認
+
+        250件のファイルを処理する場合:
+        - バッチ1: 1-100
+        - バッチ2: 101-200
+        - バッチ3: 201-250
+
+        各バッチ処理後にメモリが解放されることを間接的に確認
+        （read_file の呼び出し回数で検証）
+        """
+        # Arrange
+        mock_synology_fetcher = MagicMock()
+        mock_immich_client = MagicMock()
+        mock_progress_tracker = MagicMock()
+        mock_file_reader = MagicMock()
+
+        # 250件のファイル
+        num_files = 250
+        synology_files = [f"/volume1/photo/file{i}.jpg" for i in range(num_files)]
+        mock_synology_fetcher.get_album_files.return_value = synology_files
+
+        # 対応する Immich アセット（全て一致）
+        import base64
+        import hashlib
+
+        def make_content(i):
+            return f"content{i}".encode()
+
+        def make_hash(i):
+            return base64.b64encode(hashlib.sha1(make_content(i)).digest()).decode()
+
+        immich_assets = [
+            {"id": f"asset-{i}", "originalFileName": f"file{i}.jpg", "checksum": make_hash(i)}
+            for i in range(num_files)
+        ]
+        mock_immich_client.get_album_assets.return_value = immich_assets
+
+        # read_file が呼ばれるたびに対応するコンテンツを返す
+        call_count = [0]
+        def read_file_side_effect(path):
+            idx = call_count[0]
+            call_count[0] += 1
+            return make_content(idx)
+
+        mock_file_reader.read_file.side_effect = read_file_side_effect
+
+        verifier = AlbumVerifier(
+            synology_fetcher=mock_synology_fetcher,
+            immich_client=mock_immich_client,
+            progress_tracker=mock_progress_tracker,
+            file_reader=mock_file_reader,
+        )
+
+        synology_album = SynologyAlbum(id=1, name="大量写真", item_count=num_files)
+        immich_album = {"id": "uuid-1", "albumName": "大量写真", "assetCount": num_files}
+
+        # Act
+        result = verifier._compare_album_contents_batch(
+            synology_album,
+            immich_album,
+            batch_size=100,
+        )
+
+        # Assert
+        assert result.synology_file_count == num_files
+        assert result.immich_asset_count == num_files
+        assert result.missing_in_immich == []
+        assert result.hash_mismatches == []
+
+        # read_file が 250 回呼ばれたことを確認
+        assert mock_file_reader.read_file.call_count == num_files
+
+
+class TestAlbumVerifierResume:
+    """AlbumVerifier の再開機能テスト"""
+
+    def test_resume_from_progress_file(self, tmp_path):
+        """
+        進捗ファイルから再開できることを確認
+        """
+        import json
+
+        # Arrange
+        mock_synology_fetcher = MagicMock()
+        mock_immich_client = MagicMock()
+        mock_progress_tracker = MagicMock()
+        mock_file_reader = MagicMock()
+
+        # 進捗ファイルを作成（アルバムID=1は検証済み）
+        progress_file = tmp_path / "album_verification_progress.json"
+        with open(progress_file, "w") as f:
+            f.write(json.dumps({
+                "verified_album_ids": [1],
+                "results": [
+                    {
+                        "synology_album_id": 1,
+                        "synology_album_name": "検証済みアルバム",
+                        "status": "ok",
+                    }
+                ]
+            }))
+
+        verifier = AlbumVerifier(
+            synology_fetcher=mock_synology_fetcher,
+            immich_client=mock_immich_client,
+            progress_tracker=mock_progress_tracker,
+            file_reader=mock_file_reader,
+        )
+
+        # Act
+        verified_ids = verifier._load_progress(str(progress_file))
+
+        # Assert
+        assert 1 in verified_ids
+        assert len(verified_ids) == 1
+
+    def test_save_progress(self, tmp_path):
+        """
+        進捗を保存できることを確認
+        """
+        import json
+
+        # Arrange
+        mock_synology_fetcher = MagicMock()
+        mock_immich_client = MagicMock()
+        mock_progress_tracker = MagicMock()
+        mock_file_reader = MagicMock()
+
+        verifier = AlbumVerifier(
+            synology_fetcher=mock_synology_fetcher,
+            immich_client=mock_immich_client,
+            progress_tracker=mock_progress_tracker,
+            file_reader=mock_file_reader,
+        )
+
+        progress_file = tmp_path / "album_verification_progress.json"
+
+        result = AlbumComparisonResult(
+            synology_album_name="テストアルバム",
+            synology_album_id=42,
+            immich_album_id="uuid-42",
+            immich_album_name="テストアルバム",
+            synology_file_count=10,
+            immich_asset_count=10,
+            missing_in_immich=[],
+            extra_in_immich=[],
+            hash_mismatches=[],
+            match_type="both",
+        )
+
+        # Act
+        verifier._save_progress(str(progress_file), result)
+
+        # Assert
+        with open(progress_file, "r") as f:
+            saved = json.loads(f.read())
+
+        assert saved["synology_album_id"] == 42
+        assert saved["synology_album_name"] == "テストアルバム"
+
+
+class TestAlbumVerifierReport:
+    """AlbumVerifier のレポート出力テスト"""
+
+    def test_generate_json_report(self, tmp_path):
+        """
+        JSON レポートを生成できることを確認
+        """
+        import json
+
+        # Arrange
+        mock_synology_fetcher = MagicMock()
+        mock_immich_client = MagicMock()
+        mock_progress_tracker = MagicMock()
+        mock_file_reader = MagicMock()
+
+        verifier = AlbumVerifier(
+            synology_fetcher=mock_synology_fetcher,
+            immich_client=mock_immich_client,
+            progress_tracker=mock_progress_tracker,
+            file_reader=mock_file_reader,
+        )
+
+        # レポートデータ
+        report = AlbumVerificationReport(
+            timestamp="2026-02-05T12:34:56",
+            total_synology_albums=25,
+            total_immich_albums=27,
+            matched_albums=23,
+            unmatched_synology_albums=2,
+            unmatched_immich_albums=4,
+            album_results=[
+                AlbumComparisonResult(
+                    synology_album_name="家族写真",
+                    synology_album_id=1,
+                    immich_album_id="uuid-1",
+                    immich_album_name="家族写真",
+                    synology_file_count=100,
+                    immich_asset_count=98,
+                    missing_in_immich=["file1.jpg", "file2.jpg"],
+                    extra_in_immich=[],
+                    hash_mismatches=[],
+                    match_type="both",
+                ),
+            ],
+            synology_only=["旅行2020"],
+            immich_only=["手動作成"],
+        )
+
+        output_file = tmp_path / "report.json"
+
+        # Act
+        verifier._generate_json_report(report, str(output_file))
+
+        # Assert
+        with open(output_file, "r") as f:
+            saved = json.load(f)
+
+        assert saved["timestamp"] == "2026-02-05T12:34:56"
+        assert saved["summary"]["total_synology_albums"] == 25
+        assert saved["summary"]["total_immich_albums"] == 27
+        assert saved["summary"]["matched_albums"] == 23
+        assert len(saved["album_comparisons"]) == 1
+        assert saved["album_comparisons"][0]["synology_name"] == "家族写真"
+        assert saved["unmatched_albums"]["synology_only"] == ["旅行2020"]
+        assert saved["unmatched_albums"]["immich_only"] == ["手動作成"]
+
+
+class TestAlbumVerifierVerify:
+    """AlbumVerifier.verify() メソッドのテスト"""
+
+    def test_verify_full_workflow(self, tmp_path):
+        """
+        verify() メソッドが全体のワークフローを実行できることを確認
+        """
+        import base64
+        import hashlib
+
+        # Arrange
+        mock_synology_fetcher = MagicMock()
+        mock_immich_client = MagicMock()
+        mock_progress_tracker = MagicMock()
+        mock_file_reader = MagicMock()
+
+        # Synology アルバム
+        mock_synology_fetcher.get_albums.return_value = [
+            SynologyAlbum(id=1, name="家族写真", item_count=2),
+            SynologyAlbum(id=2, name="旅行", item_count=1),
+        ]
+
+        # Immich アルバム
+        mock_immich_client.get_albums.return_value = [
+            {"id": "uuid-1", "albumName": "家族写真", "assetCount": 2},
+            {"id": "uuid-2", "albumName": "旅行", "assetCount": 1},
+            {"id": "uuid-3", "albumName": "手動作成", "assetCount": 5},
+        ]
+
+        # 移行記録なし
+        mock_progress_tracker.get_album_by_synology_id.return_value = None
+
+        # ファイル一覧
+        mock_synology_fetcher.get_album_files.side_effect = [
+            ["/vol/file1.jpg", "/vol/file2.jpg"],  # 家族写真
+            ["/vol/trip.jpg"],                       # 旅行
+        ]
+
+        # Immich アセット
+        content1 = b"content1"
+        content2 = b"content2"
+        content3 = b"content3"
+        hash1 = base64.b64encode(hashlib.sha1(content1).digest()).decode()
+        hash2 = base64.b64encode(hashlib.sha1(content2).digest()).decode()
+        hash3 = base64.b64encode(hashlib.sha1(content3).digest()).decode()
+
+        mock_immich_client.get_album_assets.side_effect = [
+            [
+                {"id": "a1", "originalFileName": "file1.jpg", "checksum": hash1},
+                {"id": "a2", "originalFileName": "file2.jpg", "checksum": hash2},
+            ],
+            [
+                {"id": "a3", "originalFileName": "trip.jpg", "checksum": hash3},
+            ],
+        ]
+
+        mock_file_reader.read_file.side_effect = [content1, content2, content3]
+
+        verifier = AlbumVerifier(
+            synology_fetcher=mock_synology_fetcher,
+            immich_client=mock_immich_client,
+            progress_tracker=mock_progress_tracker,
+            file_reader=mock_file_reader,
+        )
+
+        output_file = tmp_path / "report.json"
+        progress_file = tmp_path / "progress.json"
+
+        # Act
+        report = verifier.verify(
+            output_file=str(output_file),
+            progress_file=str(progress_file),
+            batch_size=100,
+        )
+
+        # Assert
+        assert report.total_synology_albums == 2
+        assert report.total_immich_albums == 3
+        assert report.matched_albums == 2
+        assert len(report.album_results) == 2
+        assert report.immich_only == ["手動作成"]
+
+        # JSON レポートが生成されていること
+        assert output_file.exists()

@@ -28,15 +28,18 @@
 - [x] `test_compare_album_hash_mismatch` - ハッシュ不一致
 
 ### Test 2.4: バッチ処理
-- [ ] `test_batch_processing` - 100件ごとのバッチ処理
+- [x] `test_batch_processing` - 100件ごとのバッチ処理
 
 ### Test 2.5: 再開機能
-- [ ] `test_resume_from_progress_file` - 進捗ファイルから再開
+- [x] `test_resume_from_progress_file` - 進捗ファイルから再開
+- [x] `test_save_progress` - 進捗を保存
 
 ### Test 2.6: レポート出力
-- [ ] `test_generate_json_report` - JSON レポート生成
+- [x] `test_generate_json_report` - JSON レポート生成
 
 ## Phase 3: CLI コマンド (__main__.py)
 
 ### Test 3.1: verify-albums コマンド
-- [ ] `test_verify_albums_command` - コマンド実行（モック）
+- [x] `test_verify_albums_command` - コマンド実行（モック）
+
+## 完了！🎉

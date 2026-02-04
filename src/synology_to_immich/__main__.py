@@ -31,6 +31,7 @@ from synology_to_immich.readers.local import LocalFileReader
 from synology_to_immich.readers.smb import SmbFileReader
 from synology_to_immich.report import ReportGenerator
 from synology_to_immich.synology_db import SynologyAlbumFetcher
+from synology_to_immich.album_verify import AlbumVerifier
 from synology_to_immich.verify import VerificationResult, Verifier
 
 # rich の Console オブジェクト（見やすい出力用）
@@ -939,6 +940,197 @@ def backfill(config_path: str, dry_run: bool, verbose: bool) -> None:
     console.print("\n[bold green]補完完了！[/bold green]")
 
     progress_tracker.close()
+
+
+# =============================================================================
+# verify-albums コマンド
+# =============================================================================
+
+
+@main.command("verify-albums")
+@click.option(
+    "-c",
+    "--config",
+    "config_path",
+    required=True,
+    type=click.Path(exists=True),
+    help="設定ファイルのパス",
+)
+@click.option(
+    "-o",
+    "--output",
+    "output_path",
+    default="album_verification_report.json",
+    type=click.Path(),
+    help="出力 JSON ファイルのパス（デフォルト: album_verification_report.json）",
+)
+@click.option(
+    "--progress-file",
+    "progress_file",
+    default="album_verification_progress.json",
+    type=click.Path(),
+    help="進捗ファイルのパス（再開用）",
+)
+@click.option(
+    "--batch-size",
+    "batch_size",
+    default=100,
+    type=int,
+    help="バッチサイズ（デフォルト: 100）",
+)
+@click.option(
+    "-v",
+    "--verbose",
+    is_flag=True,
+    default=False,
+    help="詳細な出力を表示",
+)
+def verify_albums(
+    config_path: str,
+    output_path: str,
+    progress_file: str,
+    batch_size: int,
+    verbose: bool,
+) -> None:
+    """
+    アルバム単位で移行結果を検証する
+
+    Synology Photos のアルバムと Immich のアルバムを比較し、
+    ファイル数とハッシュが一致しているかを検証します。
+    再開可能。
+
+    出力は JSON 形式のレポートファイルです。
+
+    使用例:
+        synology-to-immich verify-albums -c config.toml
+        synology-to-immich verify-albums -c config.toml -o report.json
+        synology-to-immich verify-albums -c config.toml --verbose
+    """
+    # 設定ファイルの存在確認
+    config_file = Path(config_path)
+    if not config_file.exists():
+        console.print(f"[red]エラー: 設定ファイルが見つかりません: {config_path}[/red]")
+        raise SystemExit(1)
+
+    # 設定を読み込む
+    try:
+        config = load_config(config_file)
+    except Exception as e:
+        console.print(f"[red]エラー: 設定ファイルの読み込みに失敗しました: {e}[/red]")
+        raise SystemExit(1)
+
+    # Synology DB の設定がない場合はエラー
+    if not config.synology_db_host:
+        console.print(
+            "[red]エラー: Synology DB の設定がありません。"
+            "config.toml に [synology_db] セクションを追加してください。[/red]"
+        )
+        raise SystemExit(1)
+
+    # 開始メッセージを表示
+    console.print("[bold blue]アルバム検証を開始します...[/bold blue]")
+    if verbose:
+        console.print(f"  Synology DB: {config.synology_db_host}:{config.synology_db_port}")
+        console.print(f"  Immich URL: {config.immich_url}")
+        console.print(f"  バッチサイズ: {batch_size}")
+
+    # 各コンポーネントを初期化
+    # Synology Photos データベースフェッチャー
+    synology_fetcher = SynologyAlbumFetcher(
+        host=config.synology_db_host,
+        port=config.synology_db_port,
+        user=config.synology_db_user,
+        password=config.synology_db_password,
+        database=config.synology_db_name,
+    )
+
+    # Immich クライアント
+    immich_client = ImmichClient(
+        base_url=config.immich_url,
+        api_key=config.immich_api_key,
+    )
+
+    # 進捗トラッカー
+    progress_tracker = ProgressTracker(config.progress_db_path)
+
+    # FileReader を初期化（ハッシュ計算用）
+    if config.is_smb_source:
+        file_reader = SmbFileReader(
+            smb_url=config.source,
+            username=config.smb_user,
+            password=config.smb_password,
+        )
+    else:
+        file_reader = LocalFileReader(Path(config.source))
+
+    # AlbumVerifier を作成
+    verifier = AlbumVerifier(
+        synology_fetcher=synology_fetcher,
+        immich_client=immich_client,
+        progress_tracker=progress_tracker,
+        file_reader=file_reader,
+    )
+
+    # Synology DB に接続して検証を実行
+    try:
+        synology_fetcher.connect()
+        report = verifier.verify(
+            output_file=output_path,
+            progress_file=progress_file,
+            batch_size=batch_size,
+        )
+    finally:
+        synology_fetcher.close()
+        progress_tracker.close()
+
+    # 結果を表示
+    _print_album_verification_result(report, verbose)
+
+
+def _print_album_verification_result(report, verbose: bool) -> None:
+    """
+    アルバム検証結果を表示する
+    """
+    console.print()
+    console.print("[bold green]アルバム検証完了[/bold green]")
+    console.print()
+
+    # サマリーを表示
+    console.print(f"  Synology アルバム数: {report.total_synology_albums}")
+    console.print(f"  Immich アルバム数: {report.total_immich_albums}")
+    console.print(f"  [green]マッチしたアルバム: {report.matched_albums}[/green]")
+
+    if report.unmatched_synology_albums > 0:
+        console.print(f"  [yellow]Synology のみ: {report.unmatched_synology_albums}[/yellow]")
+    if report.unmatched_immich_albums > 0:
+        console.print(f"  [yellow]Immich のみ: {report.unmatched_immich_albums}[/yellow]")
+
+    # 差分があるアルバムの数
+    with_differences = sum(
+        1 for r in report.album_results
+        if r.missing_in_immich or r.extra_in_immich or r.hash_mismatches
+    )
+    if with_differences > 0:
+        console.print(f"  [red]差分があるアルバム: {with_differences}[/red]")
+
+    if verbose:
+        # Synology のみのアルバム
+        if report.synology_only:
+            console.print()
+            console.print("[yellow]Synology のみのアルバム:[/yellow]")
+            for name in report.synology_only[:10]:
+                console.print(f"    {name}")
+            if len(report.synology_only) > 10:
+                console.print(f"    ... 他 {len(report.synology_only) - 10} 件")
+
+        # Immich のみのアルバム
+        if report.immich_only:
+            console.print()
+            console.print("[yellow]Immich のみのアルバム:[/yellow]")
+            for name in report.immich_only[:10]:
+                console.print(f"    {name}")
+            if len(report.immich_only) > 10:
+                console.print(f"    ... 他 {len(report.immich_only) - 10} 件")
 
 
 # このファイルが直接実行された場合 (python __main__.py)

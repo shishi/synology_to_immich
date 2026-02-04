@@ -723,3 +723,92 @@ api_key = "test-key"
         mock_generator_class.return_value.generate.assert_called_once()
         call_args = mock_generator_class.return_value.generate.call_args
         assert "migration_report.md" in str(call_args)
+
+
+class TestVerifyAlbumsCommand:
+    """verify-albums コマンドのテスト
+
+    アルバム単位での移行検証をテストする
+    """
+
+    def test_verify_albums_requires_config(self):
+        """--config が必須であることを確認"""
+        runner = CliRunner()
+        result = runner.invoke(main, ["verify-albums"])
+
+        # config オプションが必須なので、エラー終了すること
+        assert result.exit_code != 0
+
+    @patch("synology_to_immich.__main__.load_config")
+    @patch("synology_to_immich.__main__.SynologyAlbumFetcher")
+    @patch("synology_to_immich.__main__.ImmichClient")
+    @patch("synology_to_immich.__main__.ProgressTracker")
+    @patch("synology_to_immich.__main__.LocalFileReader")
+    @patch("synology_to_immich.__main__.AlbumVerifier")
+    def test_verify_albums_success(
+        self,
+        mock_verifier_class,
+        mock_reader_class,
+        mock_tracker_class,
+        mock_immich_class,
+        mock_fetcher_class,
+        mock_load_config,
+        tmp_path,
+    ):
+        """verify-albums コマンドが正常に実行されることを確認"""
+        from synology_to_immich.album_verify import AlbumVerificationReport
+
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(
+            """
+[source]
+path = "/photos"
+
+[immich]
+url = "http://localhost:2283"
+api_key = "test-key"
+
+[synology_db]
+host = "192.168.1.1"
+port = 5432
+user = "synofoto"
+password = "password"
+database = "synofoto"
+"""
+        )
+
+        mock_config = Mock()
+        mock_config.source = "/photos"
+        mock_config.is_smb_source = False
+        mock_config.immich_url = "http://localhost:2283"
+        mock_config.immich_api_key = "test-key"
+        mock_config.progress_db_path = tmp_path / "progress.db"
+        mock_config.synology_db_host = "192.168.1.1"
+        mock_config.synology_db_port = 5432
+        mock_config.synology_db_user = "synofoto"
+        mock_config.synology_db_password = "password"
+        mock_config.synology_db_name = "synofoto"
+        mock_load_config.return_value = mock_config
+
+        # モックの verify が AlbumVerificationReport を返す
+        mock_report = AlbumVerificationReport(
+            timestamp="2026-02-05T12:00:00",
+            total_synology_albums=10,
+            total_immich_albums=12,
+            matched_albums=10,
+            unmatched_synology_albums=0,
+            unmatched_immich_albums=2,
+            album_results=[],
+            synology_only=[],
+            immich_only=["手動作成1", "手動作成2"],
+        )
+        mock_verifier_class.return_value.verify.return_value = mock_report
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["verify-albums", "-c", str(config_file), "-o", str(tmp_path / "report.json")],
+        )
+
+        assert result.exit_code == 0
+        mock_verifier_class.return_value.verify.assert_called_once()
