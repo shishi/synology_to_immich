@@ -329,3 +329,98 @@ class TestMigrator:
 
         # 処理時間が記録されている（0 以上）
         assert result.elapsed_seconds >= 0
+
+    def test_live_photo_video_upload_failure_counts_as_failed(
+        self,
+        mock_config,
+        mock_progress_tracker,
+        mock_logger,
+    ):
+        """Live Photo の動画アップロード失敗時は全体が失敗になることを確認"""
+        # Live Photo ペアを返すリーダー
+        mock_reader = Mock()
+        mock_reader.list_files.return_value = iter(
+            [
+                FileInfo(path="/photos/IMG_001.HEIC", size=1000, mtime="2024-01-01"),
+                FileInfo(path="/photos/IMG_001.MOV", size=2000, mtime="2024-01-01"),
+            ]
+        )
+        mock_reader.read_file.side_effect = lambda p: b"image" if "HEIC" in p else b"video"
+
+        # 静止画は成功、動画は失敗
+        mock_immich_client = Mock()
+        mock_immich_client.upload_asset.side_effect = [
+            ImmichUploadResult(
+                success=True,
+                asset_id="image-asset-123",
+                error_message=None,
+                is_unsupported=False,
+            ),
+            ImmichUploadResult(
+                success=False,
+                asset_id=None,
+                error_message="Video upload failed",
+                is_unsupported=False,
+            ),
+        ]
+
+        migrator = Migrator(
+            config=mock_config,
+            reader=mock_reader,
+            immich_client=mock_immich_client,
+            progress_tracker=mock_progress_tracker,
+            logger=mock_logger,
+        )
+
+        result = migrator.run()
+
+        # 動画アップロードが失敗したら、Live Photo 全体が失敗として扱われるべき
+        assert result.failed_count == 1
+        assert result.success_count == 0
+
+    def test_live_photo_video_read_error_counts_as_failed(
+        self,
+        mock_config,
+        mock_progress_tracker,
+        mock_logger,
+    ):
+        """Live Photo の動画読み込みエラー時は全体が失敗になることを確認"""
+        # Live Photo ペアを返すリーダー
+        mock_reader = Mock()
+        mock_reader.list_files.return_value = iter(
+            [
+                FileInfo(path="/photos/IMG_001.HEIC", size=1000, mtime="2024-01-01"),
+                FileInfo(path="/photos/IMG_001.MOV", size=2000, mtime="2024-01-01"),
+            ]
+        )
+
+        # 静止画は読める、動画は読み込みエラー
+        def read_file_side_effect(path):
+            if "HEIC" in path:
+                return b"image data"
+            raise IOError("Failed to read video file")
+
+        mock_reader.read_file.side_effect = read_file_side_effect
+
+        # 静止画アップロードは成功
+        mock_immich_client = Mock()
+        mock_immich_client.upload_asset.return_value = ImmichUploadResult(
+            success=True,
+            asset_id="image-asset-123",
+            error_message=None,
+            is_unsupported=False,
+        )
+
+        migrator = Migrator(
+            config=mock_config,
+            reader=mock_reader,
+            immich_client=mock_immich_client,
+            progress_tracker=mock_progress_tracker,
+            logger=mock_logger,
+        )
+
+        result = migrator.run()
+
+        # 動画読み込みエラー時は、Live Photo 全体が失敗として扱われるべき
+        assert result.failed_count == 1
+        assert result.success_count == 0

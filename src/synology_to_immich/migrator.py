@@ -284,6 +284,8 @@ class Migrator:
         # Live Photo の場合、動画も別途アップロード
         # Immich v2.x では livePhotoData フィールドが廃止されたため、
         # 写真と動画を別々にアップロードする（Immich が自動でペアリング）
+        # 動画アップロードが失敗した場合は、Live Photo 全体を失敗として扱う
+        live_photo_video_failed = False
         if group.is_live_photo and group.video_path and upload_result.success:
             try:
                 live_photo_data = self.reader.read_file(group.video_path)
@@ -304,13 +306,14 @@ class Migrator:
                         status=FileStatus.SUCCESS,
                     )
                 else:
+                    live_photo_video_failed = True
                     error_msg = f"Live Photo 動画アップロード失敗: {video_result.error_message}"
-                    self.logger.warning(
-                        f"Live Photo 動画アップロード失敗（静止画は成功）: {video_filename}",
+                    self.logger.error(
+                        f"Live Photo 動画アップロード失敗: {video_filename}",
                         file_path=group.video_path,
                         error=video_result.error_message,
                     )
-                    # 動画の失敗も DB に記録（後から追跡可能にする）
+                    # 動画の失敗も DB に記録
                     self.progress_tracker.record_file(
                         source_path=group.video_path,
                         source_hash=None,
@@ -321,13 +324,14 @@ class Migrator:
                         error_message=error_msg,
                     )
             except Exception as e:
+                live_photo_video_failed = True
                 error_msg = f"Live Photo 動画読み込みエラー: {e}"
-                self.logger.warning(
-                    f"Live Photo 動画読み込みエラー（静止画は成功）: {group.video_path}",
+                self.logger.error(
+                    f"Live Photo 動画読み込みエラー: {group.video_path}",
                     file_path=group.video_path,
                     error=str(e),
                 )
-                # 動画の失敗も DB に記録（後から追跡可能にする）
+                # 動画の失敗も DB に記録
                 self.progress_tracker.record_file(
                     source_path=group.video_path,
                     source_hash=None,
@@ -337,6 +341,12 @@ class Migrator:
                     status=FileStatus.FAILED,
                     error_message=error_msg,
                 )
+
+        # Live Photo の動画が失敗した場合は、全体を失敗として扱う
+        if live_photo_video_failed:
+            error_msg = "Live Photo の動画アップロードに失敗しました"
+            self._record_failure(group, error_msg)
+            return "failed"
 
         # 結果を処理
         if upload_result.success:
