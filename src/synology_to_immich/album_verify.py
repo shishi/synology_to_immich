@@ -341,13 +341,18 @@ class AlbumVerifier:
         batch_size: int = 100,
     ) -> AlbumComparisonResult:
         """
-        アルバムの内容をバッチ処理で比較する（メモリ効率重視）
+        アルバムの内容をバッチ処理で比較する（ハッシュベース、メモリ効率重視）
 
         100件ごとにファイルを読み込み、ハッシュ計算し、結果を出力してからメモリを解放する。
 
-        Live Photo の動画ファイルも正しくカウントする：
+        ハッシュベースの判定:
+        - Synology ファイルのハッシュを計算
+        - そのハッシュが Immich のアセットに存在すれば OK
+        - 存在しなければ missing
+
+        Live Photo の動画も正しく判定する：
         - Immich では Live Photo は1アセット（画像）+ livePhotoVideoId で紐づく動画
-        - 動画アセットの originalFileName も Immich に存在するファイルとしてカウント
+        - 動画アセットの checksum も Immich に存在するハッシュとして収集
 
         Args:
             synology_album: Synology のアルバム
@@ -363,62 +368,49 @@ class AlbumVerifier:
         # Immich のアセット一覧を取得
         immich_assets = self._immich_client.get_album_assets(immich_album["id"])
 
-        # Immich に存在するファイル名を収集（Live Photo の動画も含む）
-        immich_filenames: set[str] = set()
-        immich_by_filename: dict[str, str] = {}  # filename -> checksum
+        # Immich に存在するハッシュを収集（Live Photo の動画も含む）
+        immich_checksums: set[str] = set()
 
         for asset in immich_assets:
-            filename = asset["originalFileName"]
-            immich_filenames.add(filename)
-            immich_by_filename[filename] = asset.get("checksum")
+            checksum = asset.get("checksum")
+            if checksum:
+                immich_checksums.add(checksum)
 
-            # Live Photo の動画ファイル名も取得
+            # Live Photo の動画のハッシュも取得
             live_video_id = asset.get("livePhotoVideoId")
             if live_video_id:
                 video_asset = self._immich_client.get_asset_by_id(live_video_id)
                 if video_asset:
-                    video_filename = video_asset.get("originalFileName")
-                    if video_filename:
-                        immich_filenames.add(video_filename)
-                        immich_by_filename[video_filename] = video_asset.get("checksum")
+                    video_checksum = video_asset.get("checksum")
+                    if video_checksum:
+                        immich_checksums.add(video_checksum)
 
         # 結果を格納するリスト
         missing_in_immich = []
-        hash_mismatches = []
+        synology_checksums: set[str] = set()
 
         # バッチ処理
         for i in range(0, len(synology_files), batch_size):
             batch_paths = synology_files[i:i + batch_size]
 
-            # 100件分のファイル内容をまとめて読み込み
-            batch_contents = []
+            # 100件分のファイルのハッシュを計算して判定
             for file_path in batch_paths:
-                filename = os.path.basename(file_path)
-                immich_checksum = immich_by_filename.get(filename)
-
-                if filename not in immich_filenames:
-                    # Immich に存在しない
-                    missing_in_immich.append(file_path)
-                elif immich_checksum:
-                    # DB パスを SMB パスに変換してファイル内容を読み込み
-                    smb_path = self._convert_db_path_to_smb_path(file_path)
-                    content = self._file_reader.read_file(smb_path)
-                    batch_contents.append((file_path, content, immich_checksum))
-
-            # 100件分のハッシュ計算 & 比較
-            for file_path, content, immich_checksum in batch_contents:
+                # DB パスを SMB パスに変換してファイル内容を読み込み
+                smb_path = self._convert_db_path_to_smb_path(file_path)
+                content = self._file_reader.read_file(smb_path)
                 local_hash = base64.b64encode(hashlib.sha1(content).digest()).decode()
-                if local_hash != immich_checksum:
-                    hash_mismatches.append(file_path)
+                del content
 
-            # 100件分まとめてメモリ解放
-            del batch_contents
+                synology_checksums.add(local_hash)
 
-        # Immich にあって Synology にないファイルを検出
-        synology_filenames = {os.path.basename(f) for f in synology_files}
+                if local_hash not in immich_checksums:
+                    # ハッシュが Immich に存在しない
+                    missing_in_immich.append(file_path)
+
+        # Immich にあって Synology にないハッシュを検出
         extra_in_immich = [
-            fname for fname in immich_filenames
-            if fname not in synology_filenames
+            checksum for checksum in immich_checksums
+            if checksum not in synology_checksums
         ]
 
         # メモリ解放
@@ -430,11 +422,11 @@ class AlbumVerifier:
             synology_album_id=synology_album.id,
             immich_album_id=immich_album["id"],
             immich_album_name=immich_album["albumName"],
-            synology_file_count=len(synology_filenames),
-            immich_asset_count=len(immich_filenames),
+            synology_file_count=len(synology_checksums),
+            immich_asset_count=len(immich_checksums),
             missing_in_immich=missing_in_immich,
             extra_in_immich=extra_in_immich,
-            hash_mismatches=hash_mismatches,
+            hash_mismatches=[],  # ハッシュベースなので常に空
         )
 
     def _load_progress(self, progress_file: str) -> set[int]:
