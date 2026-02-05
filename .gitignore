@@ -42,9 +42,19 @@ config.local.toml
 .env
 
 # Progress database
-migration_progress.db
-progress.db
-hash_verification_progress.txt
+*.db
+
+# Implementation plans
+plan.md
+docs/plans/
+
+# Generated reports and progress files
+*_report.md
+*_report.json
+*_report_full.md
+*_report_full.json
+*_progress.json
+*_progress.txt
 
 # Debug scripts
 scripts/
