@@ -345,6 +345,10 @@ class AlbumVerifier:
 
         100件ごとにファイルを読み込み、ハッシュ計算し、結果を出力してからメモリを解放する。
 
+        Live Photo の動画ファイルも正しくカウントする：
+        - Immich では Live Photo は1アセット（画像）+ livePhotoVideoId で紐づく動画
+        - 動画アセットの originalFileName も Immich に存在するファイルとしてカウント
+
         Args:
             synology_album: Synology のアルバム
             immich_album: Immich のアルバム
@@ -359,11 +363,24 @@ class AlbumVerifier:
         # Immich のアセット一覧を取得
         immich_assets = self._immich_client.get_album_assets(immich_album["id"])
 
-        # Immich のアセットをファイル名でインデックス化（軽量なマップ）
-        immich_by_filename = {
-            asset["originalFileName"]: asset.get("checksum")
-            for asset in immich_assets
-        }
+        # Immich に存在するファイル名を収集（Live Photo の動画も含む）
+        immich_filenames: set[str] = set()
+        immich_by_filename: dict[str, str] = {}  # filename -> checksum
+
+        for asset in immich_assets:
+            filename = asset["originalFileName"]
+            immich_filenames.add(filename)
+            immich_by_filename[filename] = asset.get("checksum")
+
+            # Live Photo の動画ファイル名も取得
+            live_video_id = asset.get("livePhotoVideoId")
+            if live_video_id:
+                video_asset = self._immich_client.get_asset_by_id(live_video_id)
+                if video_asset:
+                    video_filename = video_asset.get("originalFileName")
+                    if video_filename:
+                        immich_filenames.add(video_filename)
+                        immich_by_filename[video_filename] = video_asset.get("checksum")
 
         # 結果を格納するリスト
         missing_in_immich = []
@@ -379,10 +396,10 @@ class AlbumVerifier:
                 filename = os.path.basename(file_path)
                 immich_checksum = immich_by_filename.get(filename)
 
-                if immich_checksum is None:
+                if filename not in immich_filenames:
                     # Immich に存在しない
                     missing_in_immich.append(file_path)
-                else:
+                elif immich_checksum:
                     # DB パスを SMB パスに変換してファイル内容を読み込み
                     smb_path = self._convert_db_path_to_smb_path(file_path)
                     content = self._file_reader.read_file(smb_path)
@@ -400,9 +417,8 @@ class AlbumVerifier:
         # Immich にあって Synology にないファイルを検出
         synology_filenames = {os.path.basename(f) for f in synology_files}
         extra_in_immich = [
-            asset["originalFileName"]
-            for asset in immich_assets
-            if asset["originalFileName"] not in synology_filenames
+            fname for fname in immich_filenames
+            if fname not in synology_filenames
         ]
 
         # メモリ解放
@@ -415,7 +431,7 @@ class AlbumVerifier:
             immich_album_id=immich_album["id"],
             immich_album_name=immich_album["albumName"],
             synology_file_count=len(synology_filenames),
-            immich_asset_count=len(immich_by_filename),
+            immich_asset_count=len(immich_filenames),
             missing_in_immich=missing_in_immich,
             extra_in_immich=extra_in_immich,
             hash_mismatches=hash_mismatches,
