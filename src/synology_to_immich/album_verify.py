@@ -243,21 +243,18 @@ class AlbumVerifier:
         Synology DB から取得したパスは /PhotoLibrary/... 形式だが、
         SMB リーダーは UNC パス形式（\\\\host\\share\\path）を期待する。
 
+        SMB 共有上にも PhotoLibrary フォルダが存在するため、
+        パスの先頭スラッシュを除去するだけで良い。
+
         Args:
             db_path: DB から取得したパス（例: /PhotoLibrary/2024/photo.jpg）
 
         Returns:
-            SMB UNC パス（例: \\\\192.168.1.1\\homes\\shishi\\Photos\\2024\\photo.jpg）
+            SMB UNC パス（例: \\\\192.168.1.1\\homes\\shishi\\Photos\\PhotoLibrary\\2024\\photo.jpg）
         """
-        # DB パスから /PhotoLibrary プレフィックスを除去
-        # 例: /PhotoLibrary/2024/photo.jpg → 2024/photo.jpg
-        if db_path.startswith("/PhotoLibrary/"):
-            relative_path = db_path[len("/PhotoLibrary/"):]
-        elif db_path.startswith("/PhotoLibrary"):
-            relative_path = db_path[len("/PhotoLibrary"):]
-        else:
-            # /PhotoLibrary で始まらない場合はそのまま使用
-            relative_path = db_path.lstrip("/")
+        # 先頭のスラッシュを除去（PhotoLibrary はそのまま保持）
+        # 例: /PhotoLibrary/2024/photo.jpg → PhotoLibrary/2024/photo.jpg
+        relative_path = db_path.lstrip("/")
 
         # スラッシュをバックスラッシュに変換
         relative_path = relative_path.replace("/", "\\")
@@ -428,6 +425,9 @@ class AlbumVerifier:
         """
         進捗ファイルから検証済みアルバム ID を読み込む
 
+        進捗ファイルは JSON Lines 形式（1行1レコード）で保存されている。
+        各行に synology_album_id が含まれる。
+
         Args:
             progress_file: 進捗ファイルのパス
 
@@ -438,10 +438,20 @@ class AlbumVerifier:
         if not progress_path.exists():
             return set()
 
+        verified_ids: set[int] = set()
         with open(progress_path, "r") as f:
-            data = json.load(f)
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                    if "synology_album_id" in record:
+                        verified_ids.add(record["synology_album_id"])
+                except json.JSONDecodeError:
+                    pass
 
-        return set(data.get("verified_album_ids", []))
+        return verified_ids
 
     def _save_progress(
         self,

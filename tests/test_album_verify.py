@@ -493,7 +493,7 @@ class TestAlbumVerifierResume:
 
     def test_resume_from_progress_file(self, tmp_path):
         """
-        進捗ファイルから再開できることを確認
+        進捗ファイル（JSON Lines 形式）から再開できることを確認
         """
         import json
 
@@ -503,19 +503,18 @@ class TestAlbumVerifierResume:
         mock_progress_tracker = MagicMock()
         mock_file_reader = MagicMock()
 
-        # 進捗ファイルを作成（アルバムID=1は検証済み）
+        # 進捗ファイルを作成（JSON Lines 形式: 1行1レコード）
         progress_file = tmp_path / "album_verification_progress.json"
         with open(progress_file, "w") as f:
+            # 複数のレコードを JSON Lines 形式で書き込み
             f.write(json.dumps({
-                "verified_album_ids": [1],
-                "results": [
-                    {
-                        "synology_album_id": 1,
-                        "synology_album_name": "検証済みアルバム",
-                        "status": "ok",
-                    }
-                ]
-            }))
+                "synology_album_id": 1,
+                "synology_album_name": "検証済みアルバム1",
+            }) + "\n")
+            f.write(json.dumps({
+                "synology_album_id": 2,
+                "synology_album_name": "検証済みアルバム2",
+            }) + "\n")
 
         verifier = AlbumVerifier(
             synology_fetcher=mock_synology_fetcher,
@@ -529,7 +528,8 @@ class TestAlbumVerifierResume:
 
         # Assert
         assert 1 in verified_ids
-        assert len(verified_ids) == 1
+        assert 2 in verified_ids
+        assert len(verified_ids) == 2
 
     def test_save_progress(self, tmp_path):
         """
@@ -739,10 +739,13 @@ class TestAlbumVerifierPathConversion:
         Synology DB から取得したパス（例: /PhotoLibrary/2024/photo.jpg）を
         SMB リーダーが期待する UNC パス形式に変換する。
 
+        SMB 共有上にも PhotoLibrary フォルダが存在するため、
+        パスの先頭スラッシュを除去するだけで良い。
+
         例:
         - DB パス: /PhotoLibrary/2024/photo.jpg
         - SMB ベース: \\\\192.168.1.1\\homes\\shishi\\Photos
-        - 結果: \\\\192.168.1.1\\homes\\shishi\\Photos\\2024\\photo.jpg
+        - 結果: \\\\192.168.1.1\\homes\\shishi\\Photos\\PhotoLibrary\\2024\\photo.jpg
         """
         # Arrange
         mock_synology_fetcher = MagicMock()
@@ -764,8 +767,8 @@ class TestAlbumVerifierPathConversion:
         db_path = "/PhotoLibrary/2024/family/photo.jpg"
         smb_path = verifier._convert_db_path_to_smb_path(db_path)
 
-        # Assert
-        expected = "\\\\192.168.1.1\\homes\\shishi\\Photos\\2024\\family\\photo.jpg"
+        # Assert - PhotoLibrary は保持される
+        expected = "\\\\192.168.1.1\\homes\\shishi\\Photos\\PhotoLibrary\\2024\\family\\photo.jpg"
         assert smb_path == expected
 
     def test_convert_db_path_preserves_nested_folders(self):
@@ -791,8 +794,8 @@ class TestAlbumVerifierPathConversion:
         db_path = "/PhotoLibrary/2024/01/01/subfolder/image.heic"
         smb_path = verifier._convert_db_path_to_smb_path(db_path)
 
-        # Assert
-        expected = "\\\\nas\\share\\photos\\2024\\01\\01\\subfolder\\image.heic"
+        # Assert - PhotoLibrary も含まれる
+        expected = "\\\\nas\\share\\photos\\PhotoLibrary\\2024\\01\\01\\subfolder\\image.heic"
         assert smb_path == expected
 
     def test_compare_album_uses_converted_paths(self):
@@ -844,6 +847,6 @@ class TestAlbumVerifierPathConversion:
         )
 
         # Assert
-        # read_file が変換後の SMB パスで呼ばれていること
-        expected_smb_path = "\\\\192.168.1.1\\homes\\shishi\\Photos\\2024\\photo1.jpg"
+        # read_file が変換後の SMB パスで呼ばれていること（PhotoLibrary も含まれる）
+        expected_smb_path = "\\\\192.168.1.1\\homes\\shishi\\Photos\\PhotoLibrary\\2024\\photo1.jpg"
         mock_file_reader.read_file.assert_called_once_with(expected_smb_path)
