@@ -557,6 +557,132 @@ class AlbumVerifier:
         with open(output_file, "w") as f:
             json.dump(output, f, ensure_ascii=False, indent=2)
 
+    def _generate_markdown_report(
+        self,
+        report: AlbumVerificationReport,
+        output_file: str,
+    ) -> None:
+        """
+        Markdown レポートを生成する
+
+        人間が読みやすい形式で Markdown ファイルを出力する。
+
+        Args:
+            report: 検証レポート
+            output_file: 出力ファイルパス
+        """
+        # サマリーを計算
+        perfect_match = sum(
+            1 for r in report.album_results
+            if len(r.missing_in_immich) == 0
+            and len(r.extra_in_immich) == 0
+            and len(r.hash_mismatches) == 0
+        )
+        with_differences = len(report.album_results) - perfect_match
+        total_missing = sum(len(r.missing_in_immich) for r in report.album_results)
+
+        # タイムスタンプを整形
+        timestamp_display = report.timestamp.replace("T", " ").split(".")[0]
+
+        lines = []
+
+        # ヘッダー
+        lines.append("# アルバム検証レポート")
+        lines.append("")
+        lines.append(f"生成日時: {timestamp_display}")
+        lines.append("")
+
+        # サマリーテーブル
+        lines.append("## サマリー")
+        lines.append("")
+        lines.append("| 項目 | 数 |")
+        lines.append("|------|-----|")
+        lines.append(f"| 総アルバム数 | {report.total_synology_albums} |")
+        lines.append(f"| 完全一致 | {perfect_match} |")
+        lines.append(f"| 欠損あり | {with_differences} |")
+        lines.append(f"| Synology のみ | {report.unmatched_synology_albums} |")
+        lines.append(f"| 欠損ファイル総数 | {total_missing} |")
+        lines.append("")
+
+        # 全アルバム一覧テーブル
+        lines.append("## 全アルバム一覧")
+        lines.append("")
+        lines.append("| アルバム名 | Synology | Immich | 欠損 | 状態 |")
+        lines.append("|------------|----------|--------|------|------|")
+
+        # 欠損数でソート（多い順）
+        sorted_results = sorted(
+            report.album_results,
+            key=lambda r: len(r.missing_in_immich),
+            reverse=True,
+        )
+
+        for result in sorted_results:
+            missing_count = len(result.missing_in_immich)
+            is_perfect = (
+                missing_count == 0
+                and len(result.extra_in_immich) == 0
+                and len(result.hash_mismatches) == 0
+            )
+            status = "✅" if is_perfect else "⚠️"
+
+            lines.append(
+                f"| {result.synology_album_name} | {result.synology_file_count} | "
+                f"{result.immich_asset_count} | {missing_count} | {status} |"
+            )
+
+        lines.append("")
+
+        # 欠損ファイル詳細
+        albums_with_missing = [
+            r for r in report.album_results
+            if len(r.missing_in_immich) > 0
+        ]
+
+        if albums_with_missing:
+            lines.append("## 欠損ファイル詳細")
+            lines.append("")
+
+            # 欠損数でソート（多い順）
+            sorted_missing = sorted(
+                albums_with_missing,
+                key=lambda r: len(r.missing_in_immich),
+                reverse=True,
+            )
+
+            for result in sorted_missing:
+                lines.append(
+                    f"### {result.synology_album_name} ({len(result.missing_in_immich)} ファイル)"
+                )
+                lines.append("")
+
+                for file_path in result.missing_in_immich:
+                    # パスからファイル名だけを表示
+                    filename = os.path.basename(file_path)
+                    lines.append(f"- `{filename}`")
+
+                lines.append("")
+
+        # Synology のみのアルバム
+        if report.synology_only:
+            lines.append("## Synology のみのアルバム（未移行）")
+            lines.append("")
+            for album_name in report.synology_only:
+                lines.append(f"- **{album_name}**")
+            lines.append("")
+
+        # Immich のみのアルバム
+        if report.immich_only:
+            lines.append("## Immich のみのアルバム")
+            lines.append("")
+            for album_name in report.immich_only:
+                lines.append(f"- {album_name}")
+            lines.append("")
+
+        # ファイルに出力
+        with open(output_file, "w") as f:
+            f.write("\n".join(lines))
+
     def verify(
         self,
         output_file: str = "album_verification_report.json",
@@ -654,5 +780,14 @@ class AlbumVerifier:
         # JSON レポート出力
         self._generate_json_report(report, output_file)
         print(f"  レポート出力: {output_file}", flush=True)
+
+        # Markdown レポート出力
+        # JSON ファイルパスから .md に拡張子を変更
+        if output_file.endswith(".json"):
+            md_output_file = output_file[:-5] + ".md"
+        else:
+            md_output_file = output_file + ".md"
+        self._generate_markdown_report(report, md_output_file)
+        print(f"  レポート出力: {md_output_file}", flush=True)
 
         return report

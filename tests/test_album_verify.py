@@ -642,6 +642,149 @@ class TestAlbumVerifierReport:
         assert saved["unmatched_albums"]["synology_only"] == ["旅行2020"]
         assert saved["unmatched_albums"]["immich_only"] == ["手動作成"]
 
+    def test_generate_markdown_report(self, tmp_path):
+        """
+        Markdown レポートを生成できることを確認
+        """
+        # Arrange
+        mock_synology_fetcher = MagicMock()
+        mock_immich_client = MagicMock()
+        mock_progress_tracker = MagicMock()
+        mock_file_reader = MagicMock()
+
+        verifier = AlbumVerifier(
+            synology_fetcher=mock_synology_fetcher,
+            immich_client=mock_immich_client,
+            progress_tracker=mock_progress_tracker,
+            file_reader=mock_file_reader,
+        )
+
+        # レポートデータ
+        report = AlbumVerificationReport(
+            timestamp="2026-02-05T12:34:56",
+            total_synology_albums=25,
+            total_immich_albums=27,
+            matched_albums=23,
+            unmatched_synology_albums=2,
+            unmatched_immich_albums=4,
+            album_results=[
+                AlbumComparisonResult(
+                    synology_album_name="家族写真",
+                    synology_album_id=1,
+                    immich_album_id="uuid-1",
+                    immich_album_name="家族写真",
+                    synology_file_count=100,
+                    immich_asset_count=98,
+                    missing_in_immich=["/vol/file1.jpg", "/vol/file2.jpg"],
+                    extra_in_immich=[],
+                    hash_mismatches=[],
+                    match_type="both",
+                ),
+                AlbumComparisonResult(
+                    synology_album_name="旅行2024",
+                    synology_album_id=2,
+                    immich_album_id="uuid-2",
+                    immich_album_name="旅行2024",
+                    synology_file_count=50,
+                    immich_asset_count=50,
+                    missing_in_immich=[],
+                    extra_in_immich=[],
+                    hash_mismatches=[],
+                    match_type="name",
+                ),
+            ],
+            synology_only=["旅行2020"],
+            immich_only=["手動作成"],
+        )
+
+        output_file = tmp_path / "report.md"
+
+        # Act
+        verifier._generate_markdown_report(report, str(output_file))
+
+        # Assert
+        with open(output_file, "r") as f:
+            content = f.read()
+
+        # 基本構造の確認
+        assert "# アルバム検証レポート" in content
+        assert "2026-02-05" in content
+
+        # サマリーテーブル
+        assert "総アルバム数" in content
+        assert "25" in content
+        assert "完全一致" in content
+
+        # アルバム一覧テーブル
+        assert "家族写真" in content
+        assert "旅行2024" in content
+        assert "✅" in content  # 完全一致
+        assert "⚠️" in content  # 欠損あり
+
+        # 欠損ファイル詳細
+        assert "欠損ファイル詳細" in content
+        assert "file1.jpg" in content
+        assert "file2.jpg" in content
+
+        # Synology のみのアルバム
+        assert "Synology のみ" in content
+        assert "旅行2020" in content
+
+    def test_generate_markdown_report_no_missing(self, tmp_path):
+        """
+        欠損がない場合の Markdown レポート
+        """
+        # Arrange
+        mock_synology_fetcher = MagicMock()
+        mock_immich_client = MagicMock()
+        mock_progress_tracker = MagicMock()
+        mock_file_reader = MagicMock()
+
+        verifier = AlbumVerifier(
+            synology_fetcher=mock_synology_fetcher,
+            immich_client=mock_immich_client,
+            progress_tracker=mock_progress_tracker,
+            file_reader=mock_file_reader,
+        )
+
+        # 欠損がないレポートデータ
+        report = AlbumVerificationReport(
+            timestamp="2026-02-05T12:34:56",
+            total_synology_albums=2,
+            total_immich_albums=2,
+            matched_albums=2,
+            unmatched_synology_albums=0,
+            unmatched_immich_albums=0,
+            album_results=[
+                AlbumComparisonResult(
+                    synology_album_name="家族写真",
+                    synology_album_id=1,
+                    immich_album_id="uuid-1",
+                    immich_album_name="家族写真",
+                    synology_file_count=100,
+                    immich_asset_count=100,
+                    missing_in_immich=[],
+                    extra_in_immich=[],
+                    hash_mismatches=[],
+                    match_type="both",
+                ),
+            ],
+            synology_only=[],
+            immich_only=[],
+        )
+
+        output_file = tmp_path / "report.md"
+
+        # Act
+        verifier._generate_markdown_report(report, str(output_file))
+
+        # Assert
+        with open(output_file, "r") as f:
+            content = f.read()
+
+        # 欠損がない場合は「欠損ファイル詳細」セクションがないはず
+        assert "欠損ファイル詳細" not in content or "なし" in content
+
 
 class TestAlbumVerifierVerify:
     """AlbumVerifier.verify() メソッドのテスト"""
@@ -727,6 +870,77 @@ class TestAlbumVerifierVerify:
 
         # JSON レポートが生成されていること
         assert output_file.exists()
+
+    def test_verify_generates_both_json_and_markdown(self, tmp_path):
+        """
+        verify() メソッドが JSON と Markdown の両方のレポートを生成することを確認
+        """
+        import base64
+        import hashlib
+
+        # Arrange
+        mock_synology_fetcher = MagicMock()
+        mock_immich_client = MagicMock()
+        mock_progress_tracker = MagicMock()
+        mock_file_reader = MagicMock()
+
+        # Synology アルバム
+        mock_synology_fetcher.get_albums.return_value = [
+            SynologyAlbum(id=1, name="家族写真", item_count=1),
+        ]
+
+        # Immich アルバム
+        mock_immich_client.get_albums.return_value = [
+            {"id": "uuid-1", "albumName": "家族写真", "assetCount": 1},
+        ]
+
+        # 移行記録なし
+        mock_progress_tracker.get_album_by_synology_id.return_value = None
+
+        # ファイル一覧
+        mock_synology_fetcher.get_album_files.return_value = ["/vol/file1.jpg"]
+
+        # Immich アセット
+        content1 = b"content1"
+        hash1 = base64.b64encode(hashlib.sha1(content1).digest()).decode()
+
+        mock_immich_client.get_album_assets.return_value = [
+            {"id": "a1", "originalFileName": "file1.jpg", "checksum": hash1},
+        ]
+
+        mock_file_reader.read_file.return_value = content1
+
+        verifier = AlbumVerifier(
+            synology_fetcher=mock_synology_fetcher,
+            immich_client=mock_immich_client,
+            progress_tracker=mock_progress_tracker,
+            file_reader=mock_file_reader,
+        )
+
+        json_file = tmp_path / "report.json"
+        progress_file = tmp_path / "progress.json"
+
+        # Act
+        report = verifier.verify(
+            output_file=str(json_file),
+            progress_file=str(progress_file),
+            batch_size=100,
+        )
+
+        # Assert
+        # JSON レポートが生成されていること
+        assert json_file.exists()
+
+        # Markdown レポートが生成されていること
+        # デフォルトでは json ファイル名から .md に変えたファイル名になる
+        md_file = tmp_path / "report.md"
+        assert md_file.exists()
+
+        # Markdown に内容が含まれていること
+        with open(md_file, "r") as f:
+            md_content = f.read()
+        assert "# アルバム検証レポート" in md_content
+        assert "家族写真" in md_content
 
 
 class TestAlbumVerifierPathConversion:
