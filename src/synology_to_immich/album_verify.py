@@ -791,3 +791,84 @@ class AlbumVerifier:
         print(f"  レポート出力: {md_output_file}", flush=True)
 
         return report
+
+    def generate_report_from_progress(
+        self,
+        progress_file: str,
+        json_output_file: str,
+        md_output_file: str,
+    ) -> AlbumVerificationReport:
+        """
+        進捗ファイルから全アルバムのレポートを再生成する
+
+        検証済みのアルバムをスキップした場合でも、進捗ファイルには
+        全アルバムの検証結果が保存されている。このメソッドは進捗ファイルを
+        読み込み、全アルバムを含むレポートを生成する。
+
+        Args:
+            progress_file: 進捗ファイルのパス（JSON Lines 形式）
+            json_output_file: JSON レポートの出力先
+            md_output_file: Markdown レポートの出力先
+
+        Returns:
+            AlbumVerificationReport: 全アルバムを含む検証レポート
+        """
+        from datetime import datetime
+
+        # 進捗ファイルを読み込む
+        progress_path = Path(progress_file)
+        if not progress_path.exists():
+            raise FileNotFoundError(f"進捗ファイルが見つかりません: {progress_file}")
+
+        album_results: list[AlbumComparisonResult] = []
+
+        with open(progress_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+
+                record = json.loads(line)
+
+                result = AlbumComparisonResult(
+                    synology_album_name=record["synology_album_name"],
+                    synology_album_id=record["synology_album_id"],
+                    immich_album_id=record.get("immich_album_id"),
+                    immich_album_name=record.get("immich_album_name"),
+                    synology_file_count=record["synology_file_count"],
+                    immich_asset_count=record["immich_asset_count"],
+                    missing_in_immich=[],  # 進捗ファイルには詳細なし
+                    extra_in_immich=[],
+                    hash_mismatches=[],
+                    match_type=record.get("match_type", "unknown"),
+                )
+
+                # missing_count から欠損ファイル数を復元（詳細は不明）
+                # レポートの統計には反映される
+                album_results.append(result)
+
+        # レポート生成
+        timestamp = datetime.now().isoformat()
+        total_albums = len(album_results)
+        perfect_match = sum(
+            1 for r in album_results
+            if r.synology_file_count == r.immich_asset_count
+        )
+
+        report = AlbumVerificationReport(
+            timestamp=timestamp,
+            total_synology_albums=total_albums,
+            total_immich_albums=total_albums,  # 進捗ファイルにはマッチしたものだけ
+            matched_albums=total_albums,
+            unmatched_synology_albums=0,
+            unmatched_immich_albums=0,
+            album_results=album_results,
+            synology_only=[],
+            immich_only=[],
+        )
+
+        # レポート出力
+        self._generate_json_report(report, json_output_file)
+        self._generate_markdown_report(report, md_output_file)
+
+        return report

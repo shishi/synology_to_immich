@@ -943,6 +943,84 @@ class TestAlbumVerifierVerify:
         assert "家族写真" in md_content
 
 
+class TestAlbumVerifierGenerateReportFromProgress:
+    """進捗ファイルからレポートを再生成するテスト"""
+
+    def test_generate_report_from_progress_file(self, tmp_path):
+        """
+        進捗ファイルから全アルバムのレポートを生成できることを確認
+        """
+        import json
+
+        # Arrange
+        mock_synology_fetcher = MagicMock()
+        mock_immich_client = MagicMock()
+        mock_progress_tracker = MagicMock()
+        mock_file_reader = MagicMock()
+
+        verifier = AlbumVerifier(
+            synology_fetcher=mock_synology_fetcher,
+            immich_client=mock_immich_client,
+            progress_tracker=mock_progress_tracker,
+            file_reader=mock_file_reader,
+        )
+
+        # 進捗ファイルを作成
+        progress_file = tmp_path / "progress.json"
+        progress_data = [
+            {
+                "synology_album_id": 1,
+                "synology_album_name": "家族写真",
+                "immich_album_id": "uuid-1",
+                "immich_album_name": "家族写真",
+                "synology_file_count": 100,
+                "immich_asset_count": 100,
+                "missing_count": 0,
+                "extra_count": 0,
+                "mismatch_count": 0,
+                "match_type": "both",
+            },
+            {
+                "synology_album_id": 2,
+                "synology_album_name": "旅行",
+                "immich_album_id": "uuid-2",
+                "immich_album_name": "旅行",
+                "synology_file_count": 50,
+                "immich_asset_count": 48,
+                "missing_count": 2,
+                "extra_count": 0,
+                "mismatch_count": 0,
+                "match_type": "name",
+            },
+        ]
+        with open(progress_file, "w") as f:
+            for record in progress_data:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+        json_output = tmp_path / "report.json"
+        md_output = tmp_path / "report.md"
+
+        # Act
+        verifier.generate_report_from_progress(
+            progress_file=str(progress_file),
+            json_output_file=str(json_output),
+            md_output_file=str(md_output),
+        )
+
+        # Assert
+        assert json_output.exists()
+        assert md_output.exists()
+
+        with open(md_output, "r") as f:
+            md_content = f.read()
+
+        # 全アルバムが含まれていること
+        assert "家族写真" in md_content
+        assert "旅行" in md_content
+        assert "100" in md_content
+        assert "50" in md_content
+
+
 class TestAlbumVerifierPathConversion:
     """AlbumVerifier のパス変換機能テスト"""
 
