@@ -727,3 +727,123 @@ class TestAlbumVerifierVerify:
 
         # JSON レポートが生成されていること
         assert output_file.exists()
+
+
+class TestAlbumVerifierPathConversion:
+    """AlbumVerifier のパス変換機能テスト"""
+
+    def test_convert_db_path_to_smb_path(self):
+        """
+        DB パス（/PhotoLibrary/...）を SMB UNC パスに変換できることを確認
+
+        Synology DB から取得したパス（例: /PhotoLibrary/2024/photo.jpg）を
+        SMB リーダーが期待する UNC パス形式に変換する。
+
+        例:
+        - DB パス: /PhotoLibrary/2024/photo.jpg
+        - SMB ベース: \\\\192.168.1.1\\homes\\shishi\\Photos
+        - 結果: \\\\192.168.1.1\\homes\\shishi\\Photos\\2024\\photo.jpg
+        """
+        # Arrange
+        mock_synology_fetcher = MagicMock()
+        mock_immich_client = MagicMock()
+        mock_progress_tracker = MagicMock()
+        mock_file_reader = MagicMock()
+
+        # SMB リーダーの smb_base_path を設定
+        mock_file_reader.smb_base_path = "\\\\192.168.1.1\\homes\\shishi\\Photos"
+
+        verifier = AlbumVerifier(
+            synology_fetcher=mock_synology_fetcher,
+            immich_client=mock_immich_client,
+            progress_tracker=mock_progress_tracker,
+            file_reader=mock_file_reader,
+        )
+
+        # Act
+        db_path = "/PhotoLibrary/2024/family/photo.jpg"
+        smb_path = verifier._convert_db_path_to_smb_path(db_path)
+
+        # Assert
+        expected = "\\\\192.168.1.1\\homes\\shishi\\Photos\\2024\\family\\photo.jpg"
+        assert smb_path == expected
+
+    def test_convert_db_path_preserves_nested_folders(self):
+        """
+        ネストされたフォルダ構造が保持されることを確認
+        """
+        # Arrange
+        mock_synology_fetcher = MagicMock()
+        mock_immich_client = MagicMock()
+        mock_progress_tracker = MagicMock()
+        mock_file_reader = MagicMock()
+
+        mock_file_reader.smb_base_path = "\\\\nas\\share\\photos"
+
+        verifier = AlbumVerifier(
+            synology_fetcher=mock_synology_fetcher,
+            immich_client=mock_immich_client,
+            progress_tracker=mock_progress_tracker,
+            file_reader=mock_file_reader,
+        )
+
+        # Act
+        db_path = "/PhotoLibrary/2024/01/01/subfolder/image.heic"
+        smb_path = verifier._convert_db_path_to_smb_path(db_path)
+
+        # Assert
+        expected = "\\\\nas\\share\\photos\\2024\\01\\01\\subfolder\\image.heic"
+        assert smb_path == expected
+
+    def test_compare_album_uses_converted_paths(self):
+        """
+        _compare_album_contents_batch がパス変換を使用することを確認
+        """
+        import base64
+        import hashlib
+
+        # Arrange
+        mock_synology_fetcher = MagicMock()
+        mock_immich_client = MagicMock()
+        mock_progress_tracker = MagicMock()
+        mock_file_reader = MagicMock()
+
+        # SMB リーダーの設定
+        mock_file_reader.smb_base_path = "\\\\192.168.1.1\\homes\\shishi\\Photos"
+
+        # DB から返されるパス（/PhotoLibrary/... 形式）
+        mock_synology_fetcher.get_album_files.return_value = [
+            "/PhotoLibrary/2024/photo1.jpg",
+        ]
+
+        # ファイル内容とハッシュ
+        content = b"test content"
+        checksum = base64.b64encode(hashlib.sha1(content).digest()).decode()
+
+        mock_immich_client.get_album_assets.return_value = [
+            {"id": "a1", "originalFileName": "photo1.jpg", "checksum": checksum},
+        ]
+
+        mock_file_reader.read_file.return_value = content
+
+        verifier = AlbumVerifier(
+            synology_fetcher=mock_synology_fetcher,
+            immich_client=mock_immich_client,
+            progress_tracker=mock_progress_tracker,
+            file_reader=mock_file_reader,
+        )
+
+        synology_album = SynologyAlbum(id=1, name="テスト", item_count=1)
+        immich_album = {"id": "uuid-1", "albumName": "テスト", "assetCount": 1}
+
+        # Act
+        result = verifier._compare_album_contents_batch(
+            synology_album,
+            immich_album,
+            batch_size=100,
+        )
+
+        # Assert
+        # read_file が変換後の SMB パスで呼ばれていること
+        expected_smb_path = "\\\\192.168.1.1\\homes\\shishi\\Photos\\2024\\photo1.jpg"
+        mock_file_reader.read_file.assert_called_once_with(expected_smb_path)

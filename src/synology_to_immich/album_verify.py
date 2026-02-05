@@ -236,6 +236,36 @@ class AlbumVerifier:
 
         return results
 
+    def _convert_db_path_to_smb_path(self, db_path: str) -> str:
+        """
+        DB パス（/PhotoLibrary/...）を SMB UNC パスに変換する
+
+        Synology DB から取得したパスは /PhotoLibrary/... 形式だが、
+        SMB リーダーは UNC パス形式（\\\\host\\share\\path）を期待する。
+
+        Args:
+            db_path: DB から取得したパス（例: /PhotoLibrary/2024/photo.jpg）
+
+        Returns:
+            SMB UNC パス（例: \\\\192.168.1.1\\homes\\shishi\\Photos\\2024\\photo.jpg）
+        """
+        # DB パスから /PhotoLibrary プレフィックスを除去
+        # 例: /PhotoLibrary/2024/photo.jpg → 2024/photo.jpg
+        if db_path.startswith("/PhotoLibrary/"):
+            relative_path = db_path[len("/PhotoLibrary/"):]
+        elif db_path.startswith("/PhotoLibrary"):
+            relative_path = db_path[len("/PhotoLibrary"):]
+        else:
+            # /PhotoLibrary で始まらない場合はそのまま使用
+            relative_path = db_path.lstrip("/")
+
+        # スラッシュをバックスラッシュに変換
+        relative_path = relative_path.replace("/", "\\")
+
+        # SMB ベースパスと結合
+        smb_base = self._file_reader.smb_base_path
+        return f"{smb_base}\\{relative_path}"
+
     def _compare_album_contents(
         self,
         synology_album: "SynologyAlbum",
@@ -356,8 +386,9 @@ class AlbumVerifier:
                     # Immich に存在しない
                     missing_in_immich.append(file_path)
                 else:
-                    # ファイル内容を読み込み
-                    content = self._file_reader.read_file(file_path)
+                    # DB パスを SMB パスに変換してファイル内容を読み込み
+                    smb_path = self._convert_db_path_to_smb_path(file_path)
+                    content = self._file_reader.read_file(smb_path)
                     batch_contents.append((file_path, content, immich_checksum))
 
             # 100件分のハッシュ計算 & 比較

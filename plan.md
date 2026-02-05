@@ -42,4 +42,11 @@
 ### Test 3.1: verify-albums コマンド
 - [x] `test_verify_albums_command` - コマンド実行（モック）
 
+## Phase 4: パス変換機能追加（バグ修正）
+
+### Test 4.1: DB パスから SMB パスへの変換
+- [x] `test_convert_db_path_to_smb_path` - DB パス（/PhotoLibrary/...）を SMB UNC パスに変換
+- [x] `test_convert_db_path_preserves_nested_folders` - ネストされたフォルダ構造が保持される
+- [x] `test_compare_album_uses_converted_paths` - 比較処理でパス変換が使われる
+
 ## 完了！🎉
