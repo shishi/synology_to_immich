@@ -763,31 +763,22 @@ class AlbumVerifier:
             # 進捗を保存
             self._save_progress(progress_file, result)
 
-        # レポート生成
-        timestamp = datetime.now().isoformat()
-        report = AlbumVerificationReport(
-            timestamp=timestamp,
-            total_synology_albums=len(synology_albums),
-            total_immich_albums=len(immich_albums),
-            matched_albums=len(matched),
-            unmatched_synology_albums=len(synology_only),
-            unmatched_immich_albums=len(immich_only),
-            album_results=album_results,
-            synology_only=synology_only,
-            immich_only=immich_only,
-        )
-
-        # JSON レポート出力
-        self._generate_json_report(report, output_file)
-        print(f"  レポート出力: {output_file}", flush=True)
-
-        # Markdown レポート出力
-        # JSON ファイルパスから .md に拡張子を変更
+        # Markdown レポート出力ファイルパスを決定
         if output_file.endswith(".json"):
             md_output_file = output_file[:-5] + ".md"
         else:
             md_output_file = output_file + ".md"
-        self._generate_markdown_report(report, md_output_file)
+
+        # 進捗ファイルから全アルバムのレポートを生成
+        # これにより、スキップしたアルバムも含む完全なレポートになる
+        report = self.generate_report_from_progress(
+            progress_file=progress_file,
+            json_output_file=output_file,
+            md_output_file=md_output_file,
+            synology_only=synology_only,
+            immich_only=immich_only,
+        )
+        print(f"  レポート出力: {output_file}", flush=True)
         print(f"  レポート出力: {md_output_file}", flush=True)
 
         return report
@@ -797,6 +788,8 @@ class AlbumVerifier:
         progress_file: str,
         json_output_file: str,
         md_output_file: str,
+        synology_only: list[str] | None = None,
+        immich_only: list[str] | None = None,
     ) -> AlbumVerificationReport:
         """
         進捗ファイルから全アルバムのレポートを再生成する
@@ -809,6 +802,8 @@ class AlbumVerifier:
             progress_file: 進捗ファイルのパス（JSON Lines 形式）
             json_output_file: JSON レポートの出力先
             md_output_file: Markdown レポートの出力先
+            synology_only: Synology にしかないアルバム名のリスト
+            immich_only: Immich にしかないアルバム名のリスト
 
         Returns:
             AlbumVerificationReport: 全アルバムを含む検証レポート
@@ -847,6 +842,10 @@ class AlbumVerifier:
                 # レポートの統計には反映される
                 album_results.append(result)
 
+        # None の場合は空リストに
+        synology_only_list = synology_only or []
+        immich_only_list = immich_only or []
+
         # レポート生成
         timestamp = datetime.now().isoformat()
         total_albums = len(album_results)
@@ -857,14 +856,14 @@ class AlbumVerifier:
 
         report = AlbumVerificationReport(
             timestamp=timestamp,
-            total_synology_albums=total_albums,
-            total_immich_albums=total_albums,  # 進捗ファイルにはマッチしたものだけ
+            total_synology_albums=total_albums + len(synology_only_list),
+            total_immich_albums=total_albums + len(immich_only_list),
             matched_albums=total_albums,
-            unmatched_synology_albums=0,
-            unmatched_immich_albums=0,
+            unmatched_synology_albums=len(synology_only_list),
+            unmatched_immich_albums=len(immich_only_list),
             album_results=album_results,
-            synology_only=[],
-            immich_only=[],
+            synology_only=synology_only_list,
+            immich_only=immich_only_list,
         )
 
         # レポート出力
