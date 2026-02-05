@@ -6,6 +6,7 @@ A CLI tool for safely migrating photos, videos, and albums from Synology Photos 
 
 - **migrate** - Transfer files from Synology Photos to Immich (SMB/local supported)
 - **verify** - Verify migration results with SHA1 hash (resumable)
+- **verify-albums** - Verify album contents with SHA1 hash (resumable, reports in JSON/Markdown)
 - **backfill** - Detect and recover missing migrations
 - **retry** - Retry failed uploads
 - **albums** - Migrate album information
@@ -44,13 +45,22 @@ synology-to-immich migrate -c config.toml
 synology-to-immich migrate -c config.toml --dry-run
 ```
 
-### 3. Verify
+### 3. Verify files
 
 ```bash
 synology-to-immich verify -c config.toml
 ```
 
-### 4. Backfill if needed
+### 4. Verify albums
+
+```bash
+# Verify all album contents with SHA1 hash
+synology-to-immich verify-albums -c config.toml
+
+# Output: album_verification_report.json, album_verification_report.md
+```
+
+### 5. Backfill if needed
 
 ```bash
 # Check missing files (dry run)
@@ -80,6 +90,7 @@ Synology Photos から Immich へ写真・動画・アルバムを安全に移�
 
 - **migrate** - Synology Photos → Immich への移行（SMB/ローカル対応）
 - **verify** - SHA1 ハッシュで移行結果を検証（再開可能）
+- **verify-albums** - アルバム内容を SHA1 ハッシュで検証（再開可能、JSON/Markdown レポート出力）
 - **backfill** - 移行漏れを検出して補完
 - **retry** - 失敗したファイルの再試行
 - **albums** - アルバム情報の移行
@@ -118,13 +129,22 @@ synology-to-immich migrate -c config.toml
 synology-to-immich migrate -c config.toml --dry-run
 ```
 
-### 3. 検証
+### 3. ファイル検証
 
 ```bash
 synology-to-immich verify -c config.toml
 ```
 
-### 4. 漏れがあれば補完
+### 4. アルバム検証
+
+```bash
+# 全アルバムの内容を SHA1 ハッシュで検証
+synology-to-immich verify-albums -c config.toml
+
+# 出力: album_verification_report.json, album_verification_report.md
+```
+
+### 5. 漏れがあれば補完
 
 ```bash
 # 漏れを確認（ドライラン）
