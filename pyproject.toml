@@ -14,7 +14,7 @@ dependencies = [
     "psycopg2-binary>=2.9",
     "rich>=13.0",
     "tomli>=2.0",
-    "pillow>=10.0",
+    "pillow>=12.2.0",
     "exifread>=3.0",
 ]
 
