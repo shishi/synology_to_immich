@@ -8,5 +8,24 @@
   "automergeStrategy": "squash",
   "platformAutomerge": true,
   "ignoreTests": false,
-  "rebaseWhen": "behind-base-branch"
+  "rebaseWhen": "behind-base-branch",
+  "packageRules": [
+    {
+      "description": "Keep CI on the minimum supported Python version (3.12)",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchPackageNames": [
+        "python"
+      ],
+      "enabled": false
+    }
+  ],
+  "timezone": "Asia/Tokyo",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "before 6am on monday"
+    ]
+  }
 }
